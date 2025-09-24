@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Jornada Espacial — p5.js</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background-color: #000;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      border: 1px solid #333;
+    }
+    #instructions {
+      position: absolute;
+      bottom: 10px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      color: #fff;
+      font-size: 14px;
+      text-shadow: 0 0 5px #000;
+    }
+  </style>
+</head>
+<body>
+  <div id="instructions">
+    SETA PARA CIMA/BAIXO: Mover nave | ESPAÇO: Atirar | R: Reiniciar jogo
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+  <script>
+// Jornada Espacial - código final
+let nave;
+let estrelas = [];
+let asteroides = [];
+let tiros = [];
+let particulas = [];
+let recompensas = [];
+let pontos = 0;
+let jogoAtivo = true;
+let energia = 100;
+let maxEnergia = 100;
+let vidas = 3;
+let maxVidas = 3;
+let telaInicial = true;
+let ultimoTiro = 0;
+let intervaloEntreTiros = 150; // Reduzido de 300 para 150 ms (mais rápido)
+let escudoAtivo = false;
+let tempoEscudo = 0;
+let duracaoEscudo = 5000; // 5 segundos
+let campoForcaAtivo = false;
+let tempoCampoForca = 0;
+let duracaoCampoForca = 5000; // 5 segundos
+let tempoUltimoChefe = 0;
+let intervaloChefes = 30000; // 30 segundos
+let chefeAtivo = null;
+
+function setup() {
+  createCanvas(800, 500);
+  nave = new Nave();
+  // criar algumas estrelas iniciais
+  for (let i = 0; i < 100; i++) {
+    estrelas.push(new Estrela());
+  }
+  // criar alguns asteroides iniciais (reduzido de 4 para 3)
+  for (let i = 0; i < 3; i++) {
+    asteroides.push(new Asteroide());
+  }
+  
+  tempoUltimoChefe = millis();
+}
+
+function draw() {
+  background(10, 10, 30); // espaço escuro com tom azulado
+  
+  // desenhar estrelas
+  for (let s of estrelas) {
+    s.update();
+    s.show();
+  }
+  
+  // atualizar e mostrar partículas
+  for (let i = particulas.length - 1; i >= 0; i--) {
+    particulas[i].update();
+    particulas[i].show();
+    if (particulas[i].alpha <= 0) {
+      particulas.splice(i, 1);
+    }
+  }
+
+  if (telaInicial) {
+    textAlign(CENTER, CENTER);
+    fill(255);
+    textSize(24);
+    text("JORNADA ESPACIAL", width/2, height/2 - 40);
+    textSize(16);
+    text("Pressione qualquer tecla para começar", width/2, height/2 + 20);
+    return;
+  }
+
+  if (jogoAtivo) {
+    // Recarregar energia gradualmente
+    if (energia < maxEnergia) {
+      energia += 0.1;
+    }
+    
+    // Atualizar escudo
+    if (escudoAtivo) {
+      tempoEscudo -= deltaTime;
+      if (tempoEscudo <= 0) {
+        escudoAtivo = false;
+      }
+    }
+    
+    // Atualizar campo de força
+    if (campoForcaAtivo) {
+      tempoCampoForca -= deltaTime;
+      if (tempoCampoForca <= 0) {
+        campoForcaAtivo = false;
+      }
+    }
+    
+    // Verificar se é hora de spawnar um chefe
+    let tempoAtual = millis();
+    if (tempoAtual - tempoUltimoChefe > intervaloChefes && chefeAtivo === null) {
+      chefeAtivo = new Chefe();
+      tempoUltimoChefe = tempoAtual;
+    }
+    
+    nave.update();
+    nave.show();
+
+    // atualizar e mostrar tiros
+    for (let i = tiros.length - 1; i >= 0; i--) {
+      let t = tiros[i];
+      t.update();
+      t.show();
+      
+      // verificar se o tiro saiu da tela
+      if (t.x > width) {
+        tiros.splice(i, 1);
+        continue;
+      }
+      
+      // verificar colisão com asteroides normais
+      for (let j = asteroides.length - 1; j >= 0; j--) {
+        let a = asteroides[j];
+        if (t.colidiuCom(a)) {
+          // Criar partículas de explosão
+          for (let k = 0; k < 15; k++) {
+            particulas.push(new Particula(a.x, a.y, a.r/2));
+          }
+          
+          // Chance de 25% de dropar uma recompensa
+          if (random() < 0.25) {
+            // Escolher aleatoriamente entre vida (50%) e escudo (50%)
+            if (random() < 0.5) {
+              recompensas.push(new Vida(a.x, a.y));
+            } else {
+              recompensas.push(new Escudo(a.x, a.y));
+            }
+          }
+          
+          // Remover asteroide e tiro
+          asteroides.splice(j, 1);
+          tiros.splice(i, 1);
+          pontos += 20;
+          
+          // Adicionar novo asteroide
+          asteroides.push(new Asteroide());
+          break;
+        }
+      }
+      
+      // verificar colisão com chefe
+      if (chefeAtivo !== null && t.colidiuCom(chefeAtivo)) {
+        chefeAtivo.vida--;
+        
+        // Criar partículas de explosão
+        for (let k = 0; k < 10; k++) {
+          particulas.push(new Particula(t.x, t.y, 10));
+        }
+        
+        tiros.splice(i, 1);
+        
+        if (chefeAtivo.vida <= 0) {
+          // Chefe destruído - ativar campo de força
+          campoForcaAtivo = true;
+          tempoCampoForca = duracaoCampoForca;
+          
+          // Criar explosão grande
+          for (let k = 0; k < 50; k++) {
+            particulas.push(new Particula(chefeAtivo.x, chefeAtivo.y, chefeAtivo.r/3));
+          }
+          
+          pontos += 500; // Bônus grande por destruir o chefe
+          chefeAtivo = null;
+        }
+        break;
+      }
+    }
+
+    // atualizar e mostrar asteroides normais
+    for (let i = asteroides.length - 1; i >= 0; i--) {
+      let a = asteroides[i];
+      a.update();
+      a.show();
+
+      // checar colisão com a nave
+      if (a.colidiuCom(nave)) {
+        if (!escudoAtivo && !campoForcaAtivo) {
+          // Criar partículas de explosão
+          for (let k = 0; k < 20; k++) {
+            particulas.push(new Particula(nave.x, nave.y, 10));
+          }
+          
+          vidas--;
+          if (vidas <= 0) {
+            jogoAtivo = false;
+          }
+        } else if (campoForcaAtivo) {
+          // Destruir asteroide com campo de força
+          for (let k = 0; k < 15; k++) {
+            particulas.push(new Particula(a.x, a.y, a.r/2));
+          }
+          pontos += 10;
+        }
+        
+        asteroides.splice(i, 1);
+        asteroides.push(new Asteroide());
+      }
+
+      // remover asteroide se saiu da tela
+      if (a.x < -a.r*2) {
+        asteroides.splice(i, 1);
+        asteroides.push(new Asteroide());
+      }
+    }
+    
+    // Atualizar e mostrar chefe
+    if (chefeAtivo !== null) {
+      chefeAtivo.update();
+      chefeAtivo.show();
+      
+      // Chefe atira ocasionalmente
+      if (frameCount % 120 === 0) {
+        chefeAtivo.atirar();
+      }
+      
+      // Verificar colisão da nave com o chefe
+      if (chefeAtivo.colidiuCom(nave) && !escudoAtivo && !campoForcaAtivo) {
+        for (let k = 0; k < 30; k++) {
+          particulas.push(new Particula(nave.x, nave.y, 15));
+        }
+        vidas = max(0, vidas - 2); // Perde 2 vidas de uma vez
+        if (vidas <= 0) {
+          jogoAtivo = false;
+        }
+      }
+      
+      // Atualizar e mostrar tiros do chefe
+      for (let i = chefeAtivo.tiros.length - 1; i >= 0; i--) {
+        let t = chefeAtivo.tiros[i];
+        t.update();
+        t.show();
+        
+        // Verificar colisão com a nave
+        if (t.colidiuCom(nave) && !escudoAtivo) {
+          for (let k = 0; k < 15; k++) {
+            particulas.push(new Particula(nave.x, nave.y, 10));
+          }
+          vidas--;
+          if (vidas <= 0) {
+            jogoAtivo = false;
+          }
+          chefeAtivo.tiros.splice(i, 1);
+        }
+        
+        // Remover tiro se saiu da tela
+        if (t.x < -20) {
+          chefeAtivo.tiros.splice(i, 1);
+        }
+      }
+    }
+
+    // Reduzida a taxa de spawn de asteroides (de 120 para 180 frames)
+    if (frameCount % 180 === 0) {
+      asteroides.push(new Asteroide());
+    }
+    
+    // Atualizar e mostrar recompensas
+    for (let i = recompensas.length - 1; i >= 0; i--) {
+      let r = recompensas[i];
+      r.update();
+      r.show();
+      
+      // Verificar colisão com a nave
+      if (r.colidiuCom(nave)) {
+        if (r instanceof Vida && vidas < maxVidas) {
+          vidas++;
+        } else if (r instanceof Escudo) {
+          escudoAtivo = true;
+          tempoEscudo = duracaoEscudo;
+        }
+        recompensas.splice(i, 1);
+      }
+      
+      // Remover recompensa se saiu da tela
+      if (r.x < -20) {
+        recompensas.splice(i, 1);
+      }
+    }
+  } else {
+    textAlign(CENTER, CENTER);
+    fill(255);
+    textSize(36);
+    text("FIM DE JOGO", width/2, height/2 - 40);
+    textSize(24);
+    text("Pontuação: " + pontos, width/2, height/2);
+    textSize(18);
+    text("Pressione R para reiniciar", width/2, height/2 + 40);
+  }
+
+  // Desenhar HUD (Heads-Up Display)
+  desenharHUD();
+}
+
+function desenharHUD() {
+  // Fundo semi-transparente para o HUD
+  fill(0, 0, 0, 150);
+  noStroke();
+  rect(0, 0, width, 40);
+  
+  // Pontuação
+  fill(255);
+  textSize(16);
+  textAlign(LEFT, CENTER);
+  text("Pontos: " + pontos, 10, 20);
+  
+  // Barra de energia
+  let barraLargura = 150;
+  let barraAltura = 15;
+  let barraX = width - barraLargura - 10;
+  let barraY = 20 - barraAltura/2;
+  
+  // Fundo da barra
+  fill(50);
+  rect(barraX, barraY, barraLargura, barraAltura);
+  
+  // Barra de energia (cor muda conforme o nível)
+  let energiaCor;
+  if (energia > 70) energiaCor = color(0, 255, 0); // Verde
+  else if (energia > 30) energiaCor = color(255, 255, 0); // Amarelo
+  else energiaCor = color(255, 0, 0); // Vermelho
+  
+  fill(energiaCor);
+  rect(barraX, barraY, barraLargura * (energia/maxEnergia), barraAltura);
+  
+  // Borda da barra
+  noFill();
+  stroke(255);
+  strokeWeight(1);
+  rect(barraX, barraY, barraLargura, barraAltura);
+  noStroke();
+  
+  // Texto da energia
+  fill(255);
+  textAlign(CENTER, CENTER);
+  text("ENERGIA: " + Math.floor(energia) + "%", barraX + barraLargura/2, barraY + barraAltura/2);
+  
+  // Vidas (corações)
+  let vidaX = width/2 - 40;
+  for (let i = 0; i < maxVidas; i++) {
+    if (i < vidas) {
+      fill(255, 0, 0); // Coração cheio
+    } else {
+      fill(50); // Coração vazio
+    }
+    desenharCoracao(vidaX + i * 25, 20, 10);
+  }
+  
+  // Indicador de escudo
+  if (escudoAtivo) {
+    fill(0, 150, 255, 150);
+    textAlign(RIGHT, CENTER);
+    text("ESCUDO: " + Math.ceil(tempoEscudo/1000) + "s", width - 10, 20);
+  }
+  
+  // Indicador de campo de força
+  if (campoForcaAtivo) {
+    fill(255, 255, 0, 200);
+    textAlign(RIGHT, CENTER);
+    text("CAMPO DE FORÇA: " + Math.ceil(tempoCampoForca/1000) + "s", width - 10, campoForcaAtivo && escudoAtivo ? 40 : 20);
+  }
+  
+  // Indicador de chefe
+  if (chefeAtivo !== null) {
+    fill(255, 0, 0);
+    textAlign(CENTER, CENTER);
+    textSize(20);
+    text("CHEFE INIMIGO!", width/2, 20);
+    
+    // Barra de vida do chefe
+    let vidaChefeLargura = 200;
+    let vidaChefeAltura = 10;
+    let vidaChefeX = width/2 - vidaChefeLargura/2;
+    let vidaChefeY = 35;
+    
+    fill(50);
+    rect(vidaChefeX, vidaChefeY, vidaChefeLargura, vidaChefeAltura);
+    
+    fill(255, 0, 0);
+    rect(vidaChefeX, vidaChefeY, vidaChefeLargura * (chefeAtivo.vida/chefeAtivo.vidaMaxima), vidaChefeAltura);
+    
+    noFill();
+    stroke(255);
+    strokeWeight(1);
+    rect(vidaChefeX, vidaChefeY, vidaChefeLargura, vidaChefeAltura);
+    noStroke();
+  }
+}
+
+function desenharCoracao(x, y, tamanho) {
+  push();
+  translate(x, y);
+  beginShape();
+  vertex(0, -tamanho/2);
+  bezierVertex(tamanho, -tamanho, tamanho, tamanho/2, 0, tamanho);
+  bezierVertex(-tamanho, tamanho/2, -tamanho, -tamanho, 0, -tamanho/2);
+  endShape(CLOSE);
+  pop();
+}
+
+// controles
+function keyPressed() {
+  if (telaInicial) {
+    telaInicial = false;
+    return;
+  }
+  
+  if (key === ' ' && jogoAtivo) {
+    atirar();
+  } else if (key === 'R' || key === 'r') {
+    reiniciar();
+  }
+}
+
+function keyReleased() {
+  if (keyCode === UP_ARROW || keyCode === DOWN_ARROW) {
+    nave.vy = 0;
+  }
+}
+
+function atirar() {
+  let agora = millis();
+  // Reduzi o custo de energia de 10 para 5
+  if (agora - ultimoTiro > intervaloEntreTiros && energia >= 5) {
+    tiros.push(new Tiro(nave.x + nave.tamanho, nave.y));
+    energia -= 5;
+    ultimoTiro = agora;
+  }
+}
+
+// Reinicia o jogo
+function reiniciar() {
+  telaInicial = false;
+  pontos = 0;
+  energia = 100;
+  vidas = 3;
+  escudoAtivo = false;
+  campoForcaAtivo = false;
+  chefeAtivo = null;
+  asteroides = [];
+  tiros = [];
+  particulas = [];
+  recompensas = [];
+  for (let i = 0; i < 3; i++) asteroides.push(new Asteroide());
+  jogoAtivo = true;
+  nave = new Nave();
+  tempoUltimoChefe = millis();
+}
+
+/* ----- Classes ----- */
+class Nave {
+  constructor() {
+    this.x = 100;
+    this.y = height / 2;
+    this.vy = 0;
+    this.tamanho = 30;
+    this.velocidade = 5; // Velocidade de movimento
+  }
+  
+  show() {
+    push();
+    translate(this.x, this.y);
+    
+    // Desenhar campo de força se ativo
+    if (campoForcaAtivo) {
+      noFill();
+      stroke(255, 255, 0, 150);
+      strokeWeight(3);
+      ellipse(0, 0, this.tamanho * 3, this.tamanho * 3);
+    }
+    
+    // Desenhar escudo se ativo
+    if (escudoAtivo) {
+      noFill();
+      stroke(0, 150, 255, 150);
+      strokeWeight(3);
+      ellipse(0, 0, this.tamanho * 2.5, this.tamanho * 2.5);
+    }
+    
+    noStroke();
+    
+    // Corpo da nave
+    fill(100, 180, 255);
+    triangle(-this.tamanho, -this.tamanho/2, -this.tamanho, this.tamanho/2, this.tamanho, 0);
+    
+    // Detalhes da nave
+    fill(70, 150, 230);
+    triangle(-this.tamanho/2, -this.tamanho/4, -this.tamanho/2, this.tamanho/4, this.tamanho/2, 0);
+    
+    // Jato (quando se movendo)
+    if (keyIsPressed && (keyCode === UP_ARROW || keyCode === DOWN_ARROW)) {
+      fill(255, 200, 0);
+      triangle(-this.tamanho-5, -this.tamanho/4, -this.tamanho-5, this.tamanho/4, -this.tamanho-15, 0);
+      fill(255, 100, 0);
+      triangle(-this.tamanho-8, -this.tamanho/6, -this.tamanho-8, this.tamanho/6, -this.tamanho-20, 0);
+    }
+    
+    pop();
+  }
+  
+  update() {
+    // Movimentação livre com setas (sem gravidade)
+    if (keyIsPressed) {
+      if (keyCode === UP_ARROW) {
+        this.vy = -this.velocidade;
+      } else if (keyCode === DOWN_ARROW) {
+        this.vy = this.velocidade;
+      }
+    }
+    
+    this.y += this.vy;
+    
+    // Limites da tela
+    this.y = constrain(this.y, this.tamanho, height - this.tamanho);
+  }
+}
+
+class Estrela {
+  constructor() {
+    this.x = random(width);
+    this.y = random(height);
+    this.t = random(1, 3); // tamanho
+    this.speed = random(0.3, 2);
+    this.brilho = random(100, 255);
+  }
+  
+  update() {
+    this.x -= this.speed;
+    if (this.x < 0) {
+      this.x = width;
+      this.y = random(height);
+    }
+    
+    // Piscar das estrelas
+    this.brilho += random(-5, 5);
+    this.brilho = constrain(this.brilho, 100, 255);
+  }
+  
+  show() {
+    noStroke();
+    fill(this.brilho);
+    ellipse(this.x, this.y, this.t, this.t);
+  }
+}
+
+class Asteroide {
+  constructor() {
+    this.x = width + random(50, 200);
+    this.y = random(40, height - 40);
+    this.r = random(20, 40);
+    this.speed = random(2, 4);
+    this.rotacao = 0;
+    this.velRotacao = random(-0.05, 0.05);
+    this.cor = color(random(150, 200), random(150, 200), random(150, 200));
+  }
+  
+  update() {
+    this.x -= this.speed;
+    this.rotacao += this.velRotacao;
+  }
+  
+  show() {
+    push();
+    translate(this.x, this.y);
+    rotate(this.rotacao);
+    
+    noStroke();
+    fill(this.cor);
+    
+    // Forma irregular de asteroide
+    beginShape();
+    for (let i = 0; i < 10; i++) {
+      let angulo = (TWO_PI / 10) * i;
+      let raio = this.r + random(-5, 5);
+      let x = cos(angulo) * raio;
+      let y = sin(angulo) * raio;
+      vertex(x, y);
+    }
+    endShape(CLOSE);
+    
+    // Detalhes na superfície
+    fill(this.cor.levels[0] - 30, this.cor.levels[1] - 30, this.cor.levels[2] - 30);
+    ellipse(-this.r/3, -this.r/4, this.r/4, this.r/4);
+    ellipse(this.r/3, this.r/4, this.r/5, this.r/5);
+    
+    pop();
+  }
+  
+  colidiuCom(obj) {
+    // colisão circular aproximada
+    let d = dist(this.x, this.y, obj.x, obj.y);
+    return d < (this.r + obj.tamanho * 0.6);
+  }
+}
+
+class Tiro {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.speed = 12; // Aumentada de 10 para 12
+    this.r = 4;
+  }
+  
+  update() {
+    this.x += this.speed;
+  }
+  
+  show() {
+    noStroke();
+    fill(255, 255, 0);
+    ellipse(this.x, this.y, this.r*2, this.r*2);
+    fill(255, 200, 0);
+    ellipse(this.x, this.y, this.r, this.r);
+  }
+  
+  colidiuCom(ast) {
+    let d = dist(this.x, this.y, ast.x, ast.y);
+    return d < (this.r + ast.r);
+  }
+}
+
+class TiroChefe {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.speed = -4; // Vai para a esquerda
+    this.r = 8;
+  }
+  
+  update() {
+    this.x += this.speed;
+  }
+  
+  show() {
+    noStroke();
+    fill(255, 0, 0);
+    ellipse(this.x, this.y, this.r*2, this.r*2);
+    fill(255, 100, 0);
+    ellipse(this.x, this.y, this.r, this.r);
+  }
+  
+  colidiuCom(nave) {
+    let d = dist(this.x, this.y, nave.x, nave.y);
+    return d < (this.r + nave.tamanho * 0.6);
+  }
+}
+
+class Chefe {
+  constructor() {
+    this.x = width - 150;
+    this.y = height / 2;
+    this.r = 80;
+    this.vidaMaxima = 10;
+    this.vida = this.vidaMaxima;
+    this.velY = 1;
+    this.tiros = [];
+  }
+  
+  update() {
+    // Movimento vertical oscilante
+    this.y += this.velY;
+    if (this.y <= this.r || this.y >= height - this.r) {
+      this.velY *= -1;
+    }
+  }
+  
+  show() {
+    push();
+    translate(this.x, this.y);
+    
+    noStroke();
+    
+    // Corpo principal
+    fill(150, 50, 50);
+    ellipse(0, 0, this.r*2, this.r*2);
+    
+    // Detalhes
+    fill(200, 70, 70);
+    ellipse(-this.r/2, -this.r/3, this.r/3, this.r/3);
+    ellipse(this.r/2, this.r/3, this.r/3, this.r/3);
+    
+    // "Olhos"
+    fill(255, 0, 0);
+    ellipse(-this.r/3, -this.r/4, this.r/5, this.r/5);
+    ellipse(this.r/3, this.r/4, this.r/5, this.r/5);
+    
+    pop();
+  }
+  
+  atirar() {
+    this.tiros.push(new TiroChefe(this.x - this.r, this.y));
+  }
+  
+  colidiuCom(obj) {
+    let d = dist(this.x, this.y, obj.x, obj.y);
+    return d < (this.r + obj.tamanho * 0.6);
+  }
+}
+
+class Particula {
+  constructor(x, y, tamanho) {
+    this.x = x;
+    this.y = y;
+    this.vx = random(-2, 2);
+    this.vy = random(-2, 2);
+    this.tamanho = random(tamanho/2, tamanho);
+    this.alpha = 255;
+    this.cor = color(255, random(100, 200), 0);
+  }
+  
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.alpha -= 5;
+    this.tamanho *= 0.95;
+  }
+  
+  show() {
+    noStroke();
+    fill(red(this.cor), green(this.cor), blue(this.cor), this.alpha);
+    ellipse(this.x, this.y, this.tamanho, this.tamanho);
+  }
+}
+
+class Recompensa {
+  constructor(x, y, tipo) {
+    this.x = x;
+    this.y = y;
+    this.vx = -1; // Movimento para a esquerda
+    this.vy = random(-0.5, 0.5);
+    this.tamanho = 15;
+    this.tipo = tipo;
+  }
+  
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+  
+  show() {
+    // Será implementado nas subclasses
+  }
+  
+  colidiuCom(nave) {
+    let d = dist(this.x, this.y, nave.x, nave.y);
+    return d < (this.tamanho + nave.tamanho * 0.6);
+  }
+}
+
+class Vida extends Recompensa {
+  constructor(x, y) {
+    super(x, y, 'vida');
+    this.cor = color(255, 0, 0);
+  }
+  
+  show() {
+    push();
+    translate(this.x, this.y);
+    noStroke();
+    fill(this.cor);
+    
+    // Desenhar coração
+    beginShape();
+    vertex(0, -this.tamanho/2);
+    bezierVertex(this.tamanho, -this.tamanho, this.tamanho, this.tamanho/2, 0, this.tamanho);
+    bezierVertex(-this.tamanho, this.tamanho/2, -this.tamanho, -this.tamanho, 0, -this.tamanho/2);
+    endShape(CLOSE);
+    
+    pop();
+  }
+}
+
+class Escudo extends Recompensa {
+  constructor(x, y) {
+    super(x, y, 'escudo');
+    this.cor = color(0, 150, 255);
+  }
+  
+  show() {
+    push();
+    translate(this.x, this.y);
+    noStroke();
+    fill(this.cor);
+    
+    // Desenhar escudo
+    ellipse(0, 0, this.tamanho * 2, this.tamanho * 2);
+    fill(10, 10, 30); // Cor de fundo
+    ellipse(0, 0, this.tamanho, this.tamanho);
+    
+    pop();
+  }
+}
+  </script>
+</body>
+</html>
